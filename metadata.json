@@ -1,0 +1,10 @@
+{
+  "name": "KaBasket",
+  "description": "Basketball computer vision app with Defend the Zone ghost defender drill, 60s reaction points dribble drill, court calibration, crossover tracking, and tactical video analysis",
+  "requestFramePermissions": [
+    "android.permission.CAMERA"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
