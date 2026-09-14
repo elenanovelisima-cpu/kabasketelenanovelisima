@@ -246,7 +246,7 @@ fun PlayNowCountdownOverlay(
                                 modifier = Modifier.size(28.dp)
                             )
                             Text(
-                                text = "¡JUGAR AHORA!",
+                                text = if (isGameMode) "¡JUGAR AHORA!" else "¡ENTRENAR AHORA!",
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 1.2.sp,

@@ -138,6 +138,7 @@ fun VisionHUD(
     onSelectDribbleCombo: () -> Unit = {},
     onSelectReactionPoints: () -> Unit = {},
     onSelectDefendZone: () -> Unit = {},
+    onSelectKidsMiniBasket: () -> Unit = {},
     onSelectShooting: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -194,7 +195,9 @@ fun VisionHUD(
             currentModeIsDribble = state.isDribbleMode,
             currentModeIsReaction = state.isReactionPointsMode,
             currentModeIsDefend = state.isDefendZoneMode,
+            currentModeIsKids = state.isKidsMiniBasketMode,
             onDismiss = { showModeSelectionDialog = false },
+            onSelectKidsMiniBasket = onSelectKidsMiniBasket,
             onSelectDribbleCombo = onSelectDribbleCombo,
             onSelectReactionPoints = onSelectReactionPoints,
             onSelectDefendZone = onSelectDefendZone,
@@ -222,6 +225,7 @@ fun VisionHUD(
             onSelectDribbleCombo = onSelectDribbleCombo,
             onSelectReactionPoints = onSelectReactionPoints,
             onSelectDefendZone = onSelectDefendZone,
+            onSelectKidsMiniBasket = onSelectKidsMiniBasket,
             onSelectShooting = onSelectShooting,
             onSelectUploadVideo = onPickVideo
         )

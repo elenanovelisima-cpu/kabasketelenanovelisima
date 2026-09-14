@@ -123,6 +123,7 @@ fun MainHomeScreen(
     onLaunchDribbleDrill: () -> Unit = onNavigateToWorkouts,
     onLaunchReactionPointsDrill: () -> Unit = onNavigateToWorkouts,
     onLaunchShootingDrill: () -> Unit = onNavigateToWorkouts,
+    onLaunchKidsMiniBasketDrill: () -> Unit = onNavigateToWorkouts,
     userHandle: String = "SHARPWING3098",
     modifier: Modifier = Modifier
 ) {
@@ -159,9 +160,10 @@ fun MainHomeScreen(
     // 1. REACTION POINTS: point.png (R.drawable.point)
     // 2. DEFEND THE ZONE: mano2.jpg (R.drawable.mano2)
     // 3. SHOOTING: tiro2.jpg (R.drawable.tiro2)
-    // 4. DRIBBLING: img_drill_dribbling.jpg (R.drawable.img_drill_dribbling)
-    // 5, 6, 7. 3 tarjetas de ejemplos bloqueadas con progreso de XP
-    val heroSlides = remember(onLaunchDefendZoneDrill, onLaunchDribbleDrill, onLaunchReactionPointsDrill, onLaunchShootingDrill) {
+    // 4. KIDS MINI BASKET: tiro.jpg (R.drawable.tiro)
+    // 5. DRIBBLING: img_drill_dribbling.jpg (R.drawable.img_drill_dribbling)
+    // 6, 7, 8. 3 tarjetas de ejemplos bloqueadas con progreso de XP
+    val heroSlides = remember(onLaunchDefendZoneDrill, onLaunchDribbleDrill, onLaunchReactionPointsDrill, onLaunchShootingDrill, onLaunchKidsMiniBasketDrill) {
         listOf(
             // 1. REACTION POINTS
             HeroWorkoutSlide(
@@ -205,7 +207,21 @@ fun MainHomeScreen(
                 imageResId = R.drawable.tiro2,
                 onAction = onLaunchShootingDrill
             ),
-            // 4. DRIBBLING
+            // 4. KIDS MINI BASKET (TIRO INFANTIL EN CASA)
+            HeroWorkoutSlide(
+                title = "¡NUEVO! KIDS MINI BASKET",
+                subtitle = "Tiro infantil en casa con calibración de aro y pelota por foto",
+                drillName = "MINI BASKET",
+                duration = "1 MIN",
+                difficulty = "KIDS / CASA",
+                isLocked = false,
+                requiredXp = 0,
+                currentXp = 32,
+                levelNumber = 4,
+                imageResId = R.drawable.tiro,
+                onAction = onLaunchKidsMiniBasketDrill
+            ),
+            // 5. DRIBBLING
             HeroWorkoutSlide(
                 title = "NEXT UP: DRIBBLING COMBO",
                 subtitle = "Entrena tu control y precisión de bote",
@@ -215,11 +231,11 @@ fun MainHomeScreen(
                 isLocked = false,
                 requiredXp = 250,
                 currentXp = 32,
-                levelNumber = 4,
+                levelNumber = 5,
                 imageResId = R.drawable.img_drill_dribbling,
                 onAction = onLaunchDribbleDrill
             ),
-            // 5. EJEMPLO BLOQUEADO 1: CROSSOVER TARGETS
+            // 6. EJEMPLO BLOQUEADO 1: CROSSOVER TARGETS
             HeroWorkoutSlide(
                 title = "CROSSOVER TARGETS",
                 subtitle = "Sube de nivel para desbloquear este entrenamiento",
@@ -229,11 +245,11 @@ fun MainHomeScreen(
                 isLocked = true,
                 requiredXp = 500,
                 currentXp = 32,
-                levelNumber = 5,
+                levelNumber = 6,
                 imageResId = R.drawable.manos,
                 onAction = { }
             ),
-            // 6. EJEMPLO BLOQUEADO 2: STEP-BACK SHOOTING
+            // 7. EJEMPLO BLOQUEADO 2: STEP-BACK SHOOTING
             HeroWorkoutSlide(
                 title = "STEP-BACK SHOOTING",
                 subtitle = "Sube de nivel para desbloquear este entrenamiento",
@@ -243,11 +259,11 @@ fun MainHomeScreen(
                 isLocked = true,
                 requiredXp = 750,
                 currentXp = 32,
-                levelNumber = 6,
-                imageResId = R.drawable.tiro,
+                levelNumber = 7,
+                imageResId = R.drawable.img_onboarding_player,
                 onAction = { }
             ),
-            // 7. EJEMPLO BLOQUEADO 3: PRO AGILITY & ATTACK
+            // 8. EJEMPLO BLOQUEADO 3: PRO AGILITY & ATTACK
             HeroWorkoutSlide(
                 title = "PRO AGILITY & ATTACK",
                 subtitle = "Sube de nivel para desbloquear este entrenamiento",
@@ -257,7 +273,7 @@ fun MainHomeScreen(
                 isLocked = true,
                 requiredXp = 1000,
                 currentXp = 32,
-                levelNumber = 7,
+                levelNumber = 8,
                 imageResId = R.drawable.jugador,
                 onAction = { }
             )
@@ -944,7 +960,7 @@ private fun SingleHeroWorkoutCard(
                         modifier = Modifier.size(24.dp)
                     )
                     Text(
-                        text = "¡JUGAR AHORA!",
+                        text = if (isGameMode) "¡JUGAR AHORA!" else "¡ENTRENAR AHORA!",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp,

@@ -50,7 +50,9 @@ fun ModeSelectionDialog(
     currentModeIsDribble: Boolean,
     currentModeIsReaction: Boolean,
     currentModeIsDefend: Boolean = false,
+    currentModeIsKids: Boolean = false,
     onDismiss: () -> Unit,
+    onSelectKidsMiniBasket: () -> Unit = {},
     onSelectDribbleCombo: () -> Unit,
     onSelectReactionPoints: () -> Unit,
     onSelectDefendZone: () -> Unit = {},
@@ -138,6 +140,20 @@ fun ModeSelectionDialog(
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
+
+                // -1. KIDS MINI BASKET
+                ModeCardItem(
+                    title = "Kids Mini Basket (Casa)",
+                    badge = "🏀 ¡NUEVO! • CALIBRACIÓN",
+                    description = "Tiro a canasta infantil en casa con calibración guiada de aro y pelota por foto.",
+                    emoji = "🎉",
+                    isActive = currentModeIsKids,
+                    testTag = "select_mode_kids_mini_basket",
+                    onClick = {
+                        onDismiss()
+                        onSelectKidsMiniBasket()
+                    }
+                )
 
                 // 0. DEFEND THE ZONE
                 ModeCardItem(

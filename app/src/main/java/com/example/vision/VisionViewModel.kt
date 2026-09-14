@@ -37,6 +37,14 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
     @Volatile private var lastBallSeenTime: Long = 0L
     @Volatile private var lastBallNearHandTime: Long = 0L
 
+    var kidsFrozenBitmap: Bitmap? = null
+        private set
+    @Volatile private var lastObservedFrameBitmap: Bitmap? = null
+    val pendingKidsPhotoCapture = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var kidsTimerJob: Job? = null
+    private var lastKidsBasketMakeTime = 0L
+    private var lastBallInEntryZoneTime = 0L
+
     private val _uiState = MutableStateFlow(
         VisionState(
             modelState = if (detector.isModelLoaded) ModelState.LOADED else ModelState.ERROR,
@@ -334,6 +342,9 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         playCountdownJob = viewModelScope.launch {
             for (sec in 3 downTo 1) {
                 _uiState.update { it.copy(playStartCountdownSec = sec) }
+                if (_uiState.value.isReactionPointsMode || _uiState.value.isKidsMiniBasketMode) {
+                    VoiceCoachManager.speakCountdown(sec)
+                }
                 delay(1000)
             }
             _uiState.update { 
@@ -345,11 +356,15 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
             // Inicia el juego oficialmente tras llegar a 0
             sessionStartTime = System.currentTimeMillis()
             if (_uiState.value.isReactionPointsMode) {
+                VoiceCoachManager.speakCountdown(0)
                 startReactionSessionNow()
             } else if (_uiState.value.isDribbleMode) {
                 startDribbleSessionNow()
             } else if (_uiState.value.isDefendZoneMode) {
                 startDefendZoneSessionNow()
+            } else if (_uiState.value.isKidsMiniBasketMode) {
+                VoiceCoachManager.speakCountdown(0)
+                startKidsMiniBasketSessionNow()
             }
         }
     }
@@ -357,6 +372,7 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
     fun cancelPlayCountdown() {
         playCountdownJob?.cancel()
         playCountdownJob = null
+        VoiceCoachManager.stop()
         _uiState.update { 
             it.copy(
                 isAwaitingPlayStart = false,
@@ -861,6 +877,12 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         defendFlashJob = null
         playCountdownJob?.cancel()
         playCountdownJob = null
+        kidsTimerJob?.cancel()
+        kidsTimerJob = null
+        try {
+            kidsFrozenBitmap?.recycle()
+            kidsFrozenBitmap = null
+        } catch (_: Exception) {}
         reset()
         _uiState.update {
             it.copy(
@@ -883,6 +905,17 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
                 isDefendGameOver = false,
                 defendWarningMessage = null,
                 defendScreenFlashRed = false,
+                isKidsMiniBasketMode = false,
+                kidsBasketScore = 0,
+                kidsBasketMakes = 0,
+                kidsBasketAttempts = 0,
+                kidsBasketStreak = 0,
+                kidsBasketTimerRemainingSec = 60,
+                isKidsTimerRunning = false,
+                isKidsSessionFinished = false,
+                kidsCalibrationStep = KidsCalibrationStep.NOT_STARTED,
+                kidsBasketPopups = emptyList(),
+                kidsSwishCelebration = false,
                 useFrontCamera = false,
                 calibrationStep = CalibrationStep.POSITION_PHONE,
                 lockedHoop = null,
@@ -909,6 +942,21 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
 
         val now = System.currentTimeMillis()
         frameTimestamps.add(now)
+
+        try {
+            lastObservedFrameBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        } catch (_: Exception) {}
+
+        // Captura de foto fija para calibración Kids Mini Basket
+        if (pendingKidsPhotoCapture.compareAndSet(true, false)) {
+            try {
+                kidsFrozenBitmap?.recycle()
+                kidsFrozenBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                _uiState.update { it.copy(kidsCalibrationStep = KidsCalibrationStep.ADJUST_HOOP_VIEW) }
+            } catch (e: Exception) {
+                android.util.Log.e("VisionViewModel", "Error capturando fotograma kids: ${e.message}")
+            }
+        }
 
         // 1. Dispatch Asynchronous Deep YOLO detection if worker is free (never blocks camera thread)
         if (isYoloBusy.compareAndSet(false, true)) {
@@ -940,12 +988,14 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // 2. Dispatch Asynchronous Pose Estimation if requested and worker is free
-        val needsPose = _uiState.value.showSkeleton ||
+        // 2. Dispatch Asynchronous Pose Estimation if requested and worker is free (Desactivado en Kids Mini Basket para máximo rendimiento 60 FPS)
+        val needsPose = !_uiState.value.isKidsMiniBasketMode && (
+            _uiState.value.showSkeleton ||
             _uiState.value.isDribbleMode ||
             _uiState.value.isReactionPointsMode ||
             _uiState.value.isDefendZoneMode ||
             _uiState.value.calibrationStep == CalibrationStep.CALIBRATE_SKELETON
+        )
         if (needsPose && isPoseBusy.compareAndSet(false, true)) {
             val copy = try {
                 bitmap.copy(bitmap.config ?: Bitmap.Config.ARGB_8888, false)
@@ -1044,6 +1094,16 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
             checkReactionPointHit(skeleton, effectiveBall)
         }
 
+        // 4c. Kids Mini Basket: Escaneo en vivo de la pelota (Móvil en mano con rotación 360º)
+        if (_uiState.value.isKidsMiniBasketMode && _uiState.value.kidsCalibrationStep == KidsCalibrationStep.SCAN_BALL_HAND) {
+            processKidsBallScanFrame(bitmap)
+        }
+
+        // 4d. Kids Mini Basket: Detección rápida de canasta infantil en tiempo real
+        if (_uiState.value.isKidsMiniBasketMode && _uiState.value.kidsCalibrationStep == KidsCalibrationStep.COMPLETED && isGameplayActive) {
+            processKidsMiniBasketFrame(bitmap, yoloDet?.ball)
+        }
+
         // 5. Automatic Skeleton Calibration Step (in Dribble training mode)
         if (_uiState.value.calibrationStep == CalibrationStep.CALIBRATE_SKELETON) {
             processSkeletonCalibration(skeleton)
@@ -1055,7 +1115,7 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // 6. If hoop is not locked yet and YOLO finds one, suggest its position
-        if (!_uiState.value.isDribbleMode && _uiState.value.lockedHoop?.isLocked != true && yoloDet?.hoop != null) {
+        if (!_uiState.value.isDribbleMode && !_uiState.value.isKidsMiniBasketMode && _uiState.value.lockedHoop?.isLocked != true && yoloDet?.hoop != null) {
             _uiState.update { current ->
                 if (current.lockedHoop?.isLocked != true) {
                     current.copy(
@@ -1072,7 +1132,7 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // 7. Feed to Shot Engine on EVERY 30 FPS frame! (25-30 frames per second of flight data)
-        if (!_uiState.value.isDribbleMode && !_uiState.value.isReactionPointsMode && !_uiState.value.isDefendZoneMode && isGameplayActive) {
+        if (!_uiState.value.isDribbleMode && !_uiState.value.isReactionPointsMode && !_uiState.value.isDefendZoneMode && !_uiState.value.isKidsMiniBasketMode && isGameplayActive) {
             val combined = DetectionFrame(
                 ball = effectiveBall,
                 hoop = effectiveHoop,
@@ -1393,6 +1453,7 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun onReactionPointExpired(expiredPoint: ReactionPoint) {
+        VoiceCoachManager.onReactionMiss()
         val nextSide = if (expiredPoint.side == ReactionTargetSide.LEFT) ReactionTargetSide.RIGHT else ReactionTargetSide.LEFT
         val nextNumber = expiredPoint.number + 1
         val nextPoint = generateReactionPoint(number = nextNumber, side = nextSide)
@@ -1436,6 +1497,7 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
                         val remaining = current.reactionTimerRemainingSec - 1
                         if (remaining <= 0) {
                             pointTimeoutJob?.cancel()
+                            VoiceCoachManager.onSessionFinished(current.reactionScore)
                             com.example.supabase.SupabaseSyncManager.recordMinigameScore(
                                 gameMode = "REACTION_POINTS",
                                 score = current.reactionScore,
@@ -1450,6 +1512,9 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
                                 activeReactionPoint = null
                             )
                         } else {
+                            if (remaining == 20 || remaining == 10 || remaining == 5) {
+                                VoiceCoachManager.onTimeRemaining(remaining)
+                            }
                             current.copy(reactionTimerRemainingSec = remaining)
                         }
                     }
@@ -1511,6 +1576,7 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         reactionTimerJob?.cancel()
         pointTimeoutJob?.cancel()
         playCountdownJob?.cancel()
+        VoiceCoachManager.stop()
         _uiState.update {
             it.copy(
                 reactionScore = 0,
@@ -1534,6 +1600,7 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         pointTimeoutJob?.cancel()
 
         val newScore = state.reactionScore + 1
+        VoiceCoachManager.onReactionHit(newScore)
         val posX = currentPoint.xNorm
         val posY = currentPoint.yNorm
 
@@ -2823,6 +2890,420 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // =========================================================================
+    // MÉTODOS DEL MODO KIDS MINI BASKET (TIRO INFANTIL EN CASA CON CALIBRACIÓN)
+    // =========================================================================
+
+    fun startKidsMiniBasketMode() {
+        playCountdownJob?.cancel()
+        kidsTimerJob?.cancel()
+        try {
+            kidsFrozenBitmap?.recycle()
+            kidsFrozenBitmap = null
+        } catch (_: Exception) {}
+
+        _uiState.update {
+            it.copy(
+                isKidsMiniBasketMode = true,
+                isDribbleMode = false,
+                isReactionPointsMode = false,
+                isDefendZoneMode = false,
+                isTacticalMode = false,
+                useFrontCamera = false,
+                kidsBasketScore = 0,
+                kidsBasketMakes = 0,
+                kidsBasketAttempts = 0,
+                kidsBasketStreak = 0,
+                kidsBasketTimerRemainingSec = 60,
+                isKidsTimerRunning = false,
+                isKidsSessionFinished = false,
+                kidsCalibrationStep = KidsCalibrationStep.SCAN_BALL_HAND,
+                kidsBallScanProgress = 0f,
+                kidsBallPaletteColors = emptyList(),
+                isKidsBallCalibrated = false,
+                calibrationStep = CalibrationStep.COMPLETED,
+                isAwaitingPlayStart = false,
+                playStartCountdownSec = null,
+                showSkeleton = false,
+                kidsBasketPopups = emptyList(),
+                kidsSwishCelebration = false,
+                inputMode = InputMode.LIVE_CAMERA
+            )
+        }
+    }
+
+    fun advanceToPlacePhoneStep() {
+        _uiState.update {
+            it.copy(
+                isKidsBallCalibrated = true,
+                kidsCalibrationStep = KidsCalibrationStep.PLACE_PHONE_STATIC
+            )
+        }
+    }
+
+    fun returnToScanBallStep() {
+        _uiState.update {
+            it.copy(kidsCalibrationStep = KidsCalibrationStep.SCAN_BALL_HAND)
+        }
+    }
+
+    fun returnToPlacePhoneStep() {
+        _uiState.update {
+            it.copy(kidsCalibrationStep = KidsCalibrationStep.PLACE_PHONE_STATIC)
+        }
+    }
+
+    fun takeKidsCalibrationPhoto() {
+        val cached = lastObservedFrameBitmap
+        if (cached != null && !cached.isRecycled) {
+            try {
+                kidsFrozenBitmap?.recycle()
+                kidsFrozenBitmap = cached.copy(Bitmap.Config.ARGB_8888, false)
+                _uiState.update { it.copy(kidsCalibrationStep = KidsCalibrationStep.ADJUST_HOOP_VIEW) }
+                return
+            } catch (_: Exception) {}
+        }
+        pendingKidsPhotoCapture.set(true)
+        viewModelScope.launch {
+            delay(350L)
+            if (_uiState.value.kidsCalibrationStep == KidsCalibrationStep.PLACE_PHONE_STATIC) {
+                if (kidsFrozenBitmap == null) {
+                    val fallback = Bitmap.createBitmap(720, 1280, Bitmap.Config.ARGB_8888).apply {
+                        eraseColor(android.graphics.Color.rgb(20, 30, 45))
+                    }
+                    kidsFrozenBitmap = fallback
+                }
+                _uiState.update { it.copy(kidsCalibrationStep = KidsCalibrationStep.ADJUST_HOOP_VIEW) }
+            }
+        }
+    }
+
+    fun updateKidsHoopPosition(xNorm: Float, yNorm: Float) {
+        _uiState.update {
+            it.copy(
+                kidsHoopX = xNorm.coerceIn(0.1f, 0.9f),
+                kidsHoopY = yNorm.coerceIn(0.08f, 0.85f)
+            )
+        }
+    }
+
+    fun updateKidsHoopRadius(radius: Float) {
+        _uiState.update {
+            it.copy(kidsHoopRadius = radius.coerceIn(0.04f, 0.22f))
+        }
+    }
+
+    fun confirmKidsHoopPosition() {
+        confirmKidsCalibrationAndStart()
+    }
+
+    fun calibrateKidsBallAt(xNorm: Float, yNorm: Float) {
+        val bmp = kidsFrozenBitmap ?: return
+        if (bmp.isRecycled) return
+
+        try {
+            val px = (xNorm * bmp.width).toInt().coerceIn(0, bmp.width - 1)
+            val py = (yNorm * bmp.height).toInt().coerceIn(0, bmp.height - 1)
+
+            var sumR = 0
+            var sumG = 0
+            var sumB = 0
+            var count = 0
+
+            for (dy in -3..3) {
+                for (dx in -3..3) {
+                    val sx = (px + dx).coerceIn(0, bmp.width - 1)
+                    val sy = (py + dy).coerceIn(0, bmp.height - 1)
+                    val color = bmp.getPixel(sx, sy)
+                    sumR += android.graphics.Color.red(color)
+                    sumG += android.graphics.Color.green(color)
+                    sumB += android.graphics.Color.blue(color)
+                    count++
+                }
+            }
+
+            val avgR = (sumR / count).coerceIn(0, 255)
+            val avgG = (sumG / count).coerceIn(0, 255)
+            val avgB = (sumB / count).coerceIn(0, 255)
+
+            val hsv = FloatArray(3)
+            android.graphics.Color.RGBToHSV(avgR, avgG, avgB, hsv)
+            val pickedColor = android.graphics.Color.rgb(avgR, avgG, avgB)
+
+            _uiState.update {
+                val currentPalette = it.kidsBallPaletteColors.toMutableList()
+                if (!currentPalette.contains(pickedColor) && currentPalette.size < 7) {
+                    currentPalette.add(pickedColor)
+                }
+                it.copy(
+                    kidsBallX = xNorm,
+                    kidsBallY = yNorm,
+                    kidsBallColorR = avgR,
+                    kidsBallColorG = avgG,
+                    kidsBallColorB = avgB,
+                    kidsBallHue = hsv[0],
+                    kidsBallSat = hsv[1],
+                    kidsBallVal = hsv[2],
+                    kidsBallPaletteColors = currentPalette,
+                    isKidsBallCalibrated = true
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("VisionViewModel", "Error en calibración de pelota: ${e.message}")
+        }
+    }
+
+    fun confirmKidsCalibrationAndStart() {
+        _uiState.update {
+            it.copy(
+                kidsCalibrationStep = KidsCalibrationStep.COMPLETED,
+                isAwaitingPlayStart = true,
+                playStartCountdownSec = null
+            )
+        }
+        startPlayCountdown()
+    }
+
+    fun startKidsMiniBasketSessionNow() {
+        kidsTimerJob?.cancel()
+        _uiState.update {
+            it.copy(
+                kidsBasketScore = 0,
+                kidsBasketMakes = 0,
+                kidsBasketAttempts = 0,
+                kidsBasketStreak = 0,
+                kidsBasketTimerRemainingSec = 60,
+                isKidsTimerRunning = true,
+                isKidsSessionFinished = false
+            )
+        }
+        kidsTimerJob = viewModelScope.launch {
+            while (isActive && _uiState.value.isKidsMiniBasketMode && _uiState.value.kidsBasketTimerRemainingSec > 0) {
+                delay(1000L)
+                val current = _uiState.value
+                if (!current.isKidsMiniBasketMode || !current.isKidsTimerRunning || current.isKidsSessionFinished) break
+                val newSec = current.kidsBasketTimerRemainingSec - 1
+                VoiceCoachManager.onTimeRemaining(newSec)
+                if (newSec <= 0) {
+                    _uiState.update {
+                        it.copy(
+                            kidsBasketTimerRemainingSec = 0,
+                            isKidsTimerRunning = false,
+                            isKidsSessionFinished = true
+                        )
+                    }
+                    VoiceCoachManager.onKidsSessionFinished(current.kidsBasketScore, current.kidsBasketMakes)
+                    break
+                } else {
+                    _uiState.update { it.copy(kidsBasketTimerRemainingSec = newSec) }
+                }
+            }
+        }
+    }
+
+    fun triggerKidsBasketMade() {
+        val current = _uiState.value
+        val newStreak = current.kidsBasketStreak + 1
+        val points = if (newStreak >= 3) 3 else 2
+        val newScore = current.kidsBasketScore + points
+        val popupText = if (newStreak >= 3) "🔥 ¡¡TRIPLAZO +$points!!" else "+$points PUNTOS"
+        val popup = KidsBasketPopup(
+            text = popupText,
+            isMake = true,
+            xNorm = current.kidsHoopX,
+            yNorm = (current.kidsHoopY - 0.05f).coerceAtLeast(0.1f)
+        )
+
+        _uiState.update {
+            it.copy(
+                kidsBasketScore = newScore,
+                kidsBasketMakes = it.kidsBasketMakes + 1,
+                kidsBasketAttempts = it.kidsBasketAttempts + 1,
+                kidsBasketStreak = newStreak,
+                kidsSwishCelebration = true,
+                kidsBasketPopups = it.kidsBasketPopups + popup
+            )
+        }
+
+        VoiceCoachManager.onKidsBasketMade(newScore, newStreak)
+
+        viewModelScope.launch {
+            delay(1000L)
+            _uiState.update { it.copy(kidsSwishCelebration = false) }
+        }
+        viewModelScope.launch {
+            delay(1800L)
+            _uiState.update { it.copy(kidsBasketPopups = it.kidsBasketPopups.filter { p -> p.id != popup.id }) }
+        }
+    }
+
+    fun manualScoreKidsBasket() {
+        triggerKidsBasketMade()
+    }
+
+    fun recalibrateKidsMiniBasket() {
+        kidsTimerJob?.cancel()
+        _uiState.update {
+            it.copy(
+                kidsCalibrationStep = KidsCalibrationStep.SCAN_BALL_HAND,
+                kidsBallScanProgress = 0f,
+                kidsBallPaletteColors = emptyList(),
+                isKidsBallCalibrated = false,
+                isKidsTimerRunning = false,
+                isKidsSessionFinished = false
+            )
+        }
+    }
+
+    private var lastKidsBallScanSampleTime = 0L
+
+    private fun processKidsBallScanFrame(bitmap: Bitmap) {
+        val now = System.currentTimeMillis()
+        if (now - lastKidsBallScanSampleTime < 100L) return
+        lastKidsBallScanSampleTime = now
+
+        val state = _uiState.value
+        val w = bitmap.width
+        val h = bitmap.height
+        val cx = w / 2
+        val cy = h / 2
+        val scanRadius = (kotlin.math.min(w, h) * 0.16f).toInt()
+
+        val sampleColors = mutableListOf<Int>()
+        val hsv = FloatArray(3)
+
+        // Muestrear puntos en anillos concéntricos dentro del círculo central guía
+        for (angle in 0 until 360 step 30) {
+            val rad = Math.toRadians(angle.toDouble())
+            for (distFraction in floatArrayOf(0.25f, 0.55f, 0.8f)) {
+                val dist = (scanRadius * distFraction).toInt()
+                val sx = (cx + dist * kotlin.math.cos(rad)).toInt().coerceIn(0, w - 1)
+                val sy = (cy + dist * kotlin.math.sin(rad)).toInt().coerceIn(0, h - 1)
+                val color = bitmap.getPixel(sx, sy)
+                android.graphics.Color.colorToHSV(color, hsv)
+                // Filtrar sombras oscuras o reflejos puros
+                if (hsv[1] > 0.18f && hsv[2] > 0.18f && hsv[2] < 0.96f) {
+                    sampleColors.add(color)
+                }
+            }
+        }
+
+        if (sampleColors.isEmpty()) return
+
+        val currentPalette = state.kidsBallPaletteColors.toMutableList()
+        for (c in sampleColors) {
+            val r = android.graphics.Color.red(c)
+            val g = android.graphics.Color.green(c)
+            val b = android.graphics.Color.blue(c)
+            val isDistinct = currentPalette.none { existing ->
+                val er = android.graphics.Color.red(existing)
+                val eg = android.graphics.Color.green(existing)
+                val eb = android.graphics.Color.blue(existing)
+                val dist = kotlin.math.sqrt(((r - er) * (r - er) + (g - eg) * (g - eg) + (b - eb) * (b - eb)).toDouble())
+                dist < 48.0
+            }
+            if (isDistinct && currentPalette.size < 7) {
+                currentPalette.add(c)
+            }
+        }
+
+        val newProgress = (state.kidsBallScanProgress + 0.04f).coerceAtMost(1f)
+        val shouldAutoAdvance = newProgress >= 1f
+
+        _uiState.update {
+            it.copy(
+                kidsBallPaletteColors = currentPalette,
+                kidsBallScanProgress = newProgress,
+                isKidsBallCalibrated = currentPalette.isNotEmpty() || newProgress > 0.25f,
+                kidsCalibrationStep = if (shouldAutoAdvance) KidsCalibrationStep.PLACE_PHONE_STATIC else it.kidsCalibrationStep
+            )
+        }
+    }
+
+    private fun processKidsMiniBasketFrame(bitmap: Bitmap, yoloBall: Det?) {
+        val state = _uiState.value
+        if (!state.isKidsMiniBasketMode || !state.isKidsTimerRunning || state.isKidsSessionFinished) return
+
+        val now = System.currentTimeMillis()
+        val hoopX = state.kidsHoopX
+        val hoopY = state.kidsHoopY
+        val hoopR = state.kidsHoopRadius
+
+        var detectedBallX: Float? = yoloBall?.nx
+        var detectedBallY: Float? = yoloBall?.ny
+
+        if (state.isKidsBallCalibrated) {
+            val paletteHsv = if (state.kidsBallPaletteColors.isNotEmpty()) {
+                state.kidsBallPaletteColors.map { color ->
+                    val arr = FloatArray(3)
+                    android.graphics.Color.colorToHSV(color, arr)
+                    arr
+                }
+            } else {
+                listOf(floatArrayOf(state.kidsBallHue, state.kidsBallSat, state.kidsBallVal))
+            }
+
+            val w = bitmap.width
+            val h = bitmap.height
+            var matchCount = 0
+            var sumX = 0L
+            var sumY = 0L
+
+            val minX = (w * (hoopX - hoopR * 2.2f).coerceIn(0f, 1f)).toInt()
+            val maxX = (w * (hoopX + hoopR * 2.2f).coerceIn(0f, 1f)).toInt()
+            val minY = (h * (hoopY - hoopR * 2.4f).coerceIn(0f, 1f)).toInt()
+            val maxY = (h * (hoopY + hoopR * 3.0f).coerceIn(0f, 1f)).toInt()
+
+            val step = 4
+            val pixelHsv = FloatArray(3)
+
+            for (y in minY until maxY step step) {
+                for (x in minX until maxX step step) {
+                    val pixel = bitmap.getPixel(x, y)
+                    android.graphics.Color.colorToHSV(pixel, pixelHsv)
+
+                    val matchesAny = paletteHsv.any { targetHsv ->
+                        val diffH = kotlin.math.abs(pixelHsv[0] - targetHsv[0]).let { if (it > 180f) 360f - it else it }
+                        val diffS = kotlin.math.abs(pixelHsv[1] - targetHsv[1])
+                        val diffV = kotlin.math.abs(pixelHsv[2] - targetHsv[2])
+                        diffH < 35f && diffS < 0.45f && diffV < 0.48f
+                    }
+
+                    if (matchesAny) {
+                        matchCount++
+                        sumX += x
+                        sumY += y
+                    }
+                }
+            }
+
+            if (matchCount >= 4) {
+                detectedBallX = (sumX.toFloat() / matchCount) / w
+                detectedBallY = (sumY.toFloat() / matchCount) / h
+            }
+        }
+
+        if (detectedBallX == null || detectedBallY == null) return
+
+        val bx = detectedBallX
+        val by = detectedBallY
+
+        // 2. Comprobar Zona de Entrada (justo por encima del aro)
+        val dx = kotlin.math.abs(bx - hoopX)
+        val isAboveRim = (by >= hoopY - hoopR * 1.6f && by <= hoopY + hoopR * 0.15f) && dx <= hoopR * 1.3f
+        if (isAboveRim) {
+            lastBallInEntryZoneTime = now
+        }
+
+        // 3. Comprobar Zona de Salida/Red (por debajo del aro)
+        val isBelowRim = (by >= hoopY + hoopR * 0.25f && by <= hoopY + hoopR * 1.8f) && dx <= hoopR * 1.15f
+        if (isBelowRim && (now - lastBallInEntryZoneTime in 70..850) && (now - lastKidsBasketMakeTime > 1500L)) {
+            lastKidsBasketMakeTime = now
+            lastBallInEntryZoneTime = 0L
+            triggerKidsBasketMade()
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         recordingJob?.cancel()
@@ -2830,6 +3311,11 @@ class VisionViewModel(application: Application) : AndroidViewModel(application) 
         defendGameLoopJob?.cancel()
         defendTimerJob?.cancel()
         defendFlashJob?.cancel()
+        kidsTimerJob?.cancel()
+        try {
+            kidsFrozenBitmap?.recycle()
+            kidsFrozenBitmap = null
+        } catch (_: Exception) {}
         try {
             yoloExecutor.shutdown()
         } catch (_: Exception) {}

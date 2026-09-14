@@ -83,15 +83,17 @@ fun VisionSettingsDialog(
     onSelectDribbleCombo: (() -> Unit)? = null,
     onSelectReactionPoints: (() -> Unit)? = null,
     onSelectDefendZone: (() -> Unit)? = null,
+    onSelectKidsMiniBasket: (() -> Unit)? = null,
     onSelectShooting: (() -> Unit)? = null,
     onSelectUploadVideo: (() -> Unit)? = null,
     onSelectThreatType: (DefendThreatType) -> Unit = {}
 ) {
     // Determine active training context
-    val isShootingMode = !state.isDribbleMode && !state.isReactionPointsMode && !state.isDefendZoneMode
+    val isShootingMode = !state.isDribbleMode && !state.isReactionPointsMode && !state.isDefendZoneMode && !state.isKidsMiniBasketMode
     val isDefendMode = state.isDefendZoneMode
     val isReactionMode = state.isReactionPointsMode
     val isDribbleMode = state.isDribbleMode
+    val isKidsMode = state.isKidsMiniBasketMode
 
     var showModeSelector by remember { mutableStateOf(false) }
 
@@ -100,7 +102,13 @@ fun VisionSettingsDialog(
             currentModeIsDribble = state.isDribbleMode,
             currentModeIsReaction = state.isReactionPointsMode,
             currentModeIsDefend = state.isDefendZoneMode,
+            currentModeIsKids = state.isKidsMiniBasketMode,
             onDismiss = { showModeSelector = false },
+            onSelectKidsMiniBasket = {
+                showModeSelector = false
+                onDismiss()
+                onSelectKidsMiniBasket?.invoke()
+            },
             onSelectDribbleCombo = {
                 showModeSelector = false
                 onDismiss()

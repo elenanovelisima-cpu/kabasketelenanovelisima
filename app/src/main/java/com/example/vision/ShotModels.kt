@@ -416,5 +416,49 @@ data class VisionState(
     val defendWarningMessage: String? = null,
     val defendScreenFlashRed: Boolean = false,
     val isAwaitingPlayStart: Boolean = false,
-    val playStartCountdownSec: Int? = null
+    val playStartCountdownSec: Int? = null,
+    // --- MODO KIDS MINI BASKET (TIRO INFANTIL EN CASA) ---
+    val isKidsMiniBasketMode: Boolean = false,
+    val kidsBasketScore: Int = 0,
+    val kidsBasketMakes: Int = 0,
+    val kidsBasketAttempts: Int = 0,
+    val kidsBasketStreak: Int = 0,
+    val kidsBasketTimerRemainingSec: Int = 60,
+    val isKidsTimerRunning: Boolean = false,
+    val isKidsSessionFinished: Boolean = false,
+    val kidsCalibrationStep: KidsCalibrationStep = KidsCalibrationStep.NOT_STARTED,
+    val kidsHoopX: Float = 0.50f,
+    val kidsHoopY: Float = 0.25f,
+    val kidsHoopRadius: Float = 0.085f,
+    val kidsBallX: Float = 0.50f,
+    val kidsBallY: Float = 0.60f,
+    val kidsBallRadius: Float = 0.045f,
+    val kidsBallColorR: Int = 230,
+    val kidsBallColorG: Int = 100,
+    val kidsBallColorB: Int = 40,
+    val kidsBallHue: Float = 22f,
+    val kidsBallSat: Float = 0.82f,
+    val kidsBallVal: Float = 0.85f,
+    val isKidsBallCalibrated: Boolean = false,
+    val kidsBallScanProgress: Float = 0f,
+    val kidsBallPaletteColors: List<Int> = emptyList(),
+    val kidsBasketPopups: List<KidsBasketPopup> = emptyList(),
+    val kidsSwishCelebration: Boolean = false
+)
+
+enum class KidsCalibrationStep {
+    NOT_STARTED,
+    SCAN_BALL_HAND,
+    PLACE_PHONE_STATIC,
+    ADJUST_HOOP_VIEW,
+    COMPLETED
+}
+
+data class KidsBasketPopup(
+    val id: Long = System.currentTimeMillis(),
+    val text: String,
+    val isMake: Boolean = true,
+    val xNorm: Float = 0.5f,
+    val yNorm: Float = 0.25f,
+    val timestamp: Long = System.currentTimeMillis()
 )

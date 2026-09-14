@@ -92,6 +92,8 @@ import com.example.vision.CameraPreview
 import com.example.vision.DefendZoneHUD
 import com.example.vision.DribbleComboHUD
 import com.example.vision.InputMode
+import com.example.vision.KidsCalibrationStep
+import com.example.vision.KidsMiniBasketHUD
 import com.example.vision.PlayNowCountdownOverlay
 import com.example.vision.ReactionPointsHUD
 import com.example.vision.SavedVideosDialog
@@ -139,6 +141,9 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(currentScreen) {
                         currentActiveScreen = currentScreen
                         updateSystemBarsForScreen(currentScreen)
+                        if (currentScreen != AppScreen.VISION_WORKOUT) {
+                            com.example.vision.VoiceCoachManager.stop()
+                        }
                     }
 
                     when (currentScreen) {
@@ -166,6 +171,11 @@ class MainActivity : ComponentActivity() {
                                     initialPickVideo = false
                                     viewModel.startShootingModeWithTutorial()
                                     currentScreen = AppScreen.VISION_WORKOUT
+                                },
+                                onLaunchKidsMiniBasketDrill = {
+                                    initialPickVideo = false
+                                    viewModel.startKidsMiniBasketMode()
+                                    currentScreen = AppScreen.VISION_WORKOUT
                                 }
                             )
                         }
@@ -176,6 +186,11 @@ class MainActivity : ComponentActivity() {
                             Step4TrainingModeSelectorView(
                                 onSelectMode = { choice ->
                                     when (choice) {
+                                        OnboardingConfig.TrainingModeChoice.KIDS_MINI_BASKET -> {
+                                            initialPickVideo = false
+                                            viewModel.startKidsMiniBasketMode()
+                                            currentScreen = AppScreen.VISION_WORKOUT
+                                        }
                                         OnboardingConfig.TrainingModeChoice.DEFEND_ZONE -> {
                                             initialPickVideo = false
                                             viewModel.startDefendZoneMode()
@@ -244,6 +259,16 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         updateSystemBarsForScreen(currentActiveScreen)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.example.vision.VoiceCoachManager.stop()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        com.example.vision.VoiceCoachManager.shutdown()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -592,7 +617,24 @@ fun VisionTestScreen(
                     }
                 )
 
-                if (state.calibrationStep != CalibrationStep.COMPLETED) {
+                if (state.isKidsMiniBasketMode) {
+                    KidsMiniBasketHUD(
+                        state = state,
+                        frozenBitmap = viewModel.kidsFrozenBitmap,
+                        onAdvanceToPlacePhone = { viewModel.advanceToPlacePhoneStep() },
+                        onTakePhoto = { viewModel.takeKidsCalibrationPhoto() },
+                        onBackToScanBall = { viewModel.returnToScanBallStep() },
+                        onBackToPlacePhone = { viewModel.returnToPlacePhoneStep() },
+                        onUpdateHoopPosition = { x, y -> viewModel.updateKidsHoopPosition(x, y) },
+                        onUpdateHoopRadius = { r -> viewModel.updateKidsHoopRadius(r) },
+                        onConfirmHoopAndStart = { viewModel.confirmKidsCalibrationAndStart() },
+                        onRestartSession = { viewModel.startKidsMiniBasketSessionNow() },
+                        onRecalibrate = { viewModel.recalibrateKidsMiniBasket() },
+                        onManualScoreBasket = { viewModel.manualScoreKidsBasket() },
+                        onExitToMain = onReopenOnboarding,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else if (state.calibrationStep != CalibrationStep.COMPLETED) {
                     CalibrationWizard(
                         currentStep = state.calibrationStep,
                         suggestedHoop = state.lockedHoop,
@@ -736,6 +778,7 @@ fun VisionTestScreen(
                         onSelectDribbleCombo = { viewModel.startDribbleMode() },
                         onSelectReactionPoints = { viewModel.startReactionPointsMode() },
                         onSelectDefendZone = { viewModel.startDefendZoneMode() },
+                        onSelectKidsMiniBasket = { viewModel.startKidsMiniBasketMode() },
                         onSelectShooting = { viewModel.startShootingModeWithTutorial() },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -743,11 +786,11 @@ fun VisionTestScreen(
             }
 
             // Overlay de "¡JUGAR AHORA!" y cuenta regresiva de 3 segundos para todos los modos de juego
-            if (state.calibrationStep == CalibrationStep.COMPLETED && (state.isAwaitingPlayStart || state.playStartCountdownSec != null)) {
+            if ((state.calibrationStep == CalibrationStep.COMPLETED || (state.isKidsMiniBasketMode && state.kidsCalibrationStep == KidsCalibrationStep.COMPLETED)) && (state.isAwaitingPlayStart || state.playStartCountdownSec != null)) {
                 PlayNowCountdownOverlay(
                     isAwaitingPlayStart = state.isAwaitingPlayStart,
                     countdownSec = state.playStartCountdownSec,
-                    isGameMode = state.isDribbleMode || state.isReactionPointsMode || state.isDefendZoneMode,
+                    isGameMode = state.isDribbleMode || state.isReactionPointsMode || state.isDefendZoneMode || state.isKidsMiniBasketMode,
                     onPlayNow = { viewModel.startPlayCountdown() },
                     onExitToMain = {
                         viewModel.cancelPlayCountdown()

@@ -36,6 +36,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -174,6 +176,30 @@ fun ReactionPointsHUD(
                             )
                         }
                     }
+                }
+
+                // Botón de Voz del Entrenador (Silenciar / Activar)
+                var isVoiceMuted by remember { mutableStateOf(!VoiceCoachManager.isVoiceEnabled) }
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (isVoiceMuted) Color(0x33FF4444) else Color(0xFF1E283D))
+                        .border(1.5.dp, if (isVoiceMuted) Color(0x88FF4444) else Color(0x33446699), CircleShape)
+                        .clickable {
+                            isVoiceMuted = !isVoiceMuted
+                            VoiceCoachManager.isVoiceEnabled = !isVoiceMuted
+                            if (isVoiceMuted) VoiceCoachManager.stop()
+                        }
+                        .testTag("reaction_voice_toggle_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isVoiceMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = if (isVoiceMuted) "Activar voz del entrenador" else "Silenciar voz",
+                        tint = if (isVoiceMuted) Color(0xFFFF6666) else Color(0xFF2FB2C9),
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
 
                 // Botón de Ajustes (arriba a la derecha, a la izquierda del contador de tiempo)

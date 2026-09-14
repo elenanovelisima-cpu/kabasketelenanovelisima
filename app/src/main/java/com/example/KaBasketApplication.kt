@@ -11,5 +11,6 @@ class KaBasketApplication : Application() {
         com.example.stats.PlayerStatsManager.init(this)
         com.example.supabase.SupabaseConfig.init(this)
         SupabaseSyncManager.init(this)
+        com.example.vision.VoiceCoachManager.init(this)
     }
 }

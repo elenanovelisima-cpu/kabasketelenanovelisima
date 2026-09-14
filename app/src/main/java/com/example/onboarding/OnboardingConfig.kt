@@ -95,6 +95,7 @@ object OnboardingConfig {
     const val Step4Subtitle = "Selecciona cómo deseas entrenar para configurar la visión artificial en tiempo real."
 
     enum class TrainingModeChoice {
+        KIDS_MINI_BASKET,  // Nuevo: Minibasket infantil en casa con calibración guiada
         DEFEND_ZONE,       // Nuevo: Esquiva a los Defensores Fantasma (Manos o Lásers, 3 vidas)
         DRIBBLE_CHALLENGE, // Analizar el bote de balón con combos LV3
         DRIBBLE_REACTION_POINTS, // Bote con Reaction Points
@@ -113,9 +114,17 @@ object OnboardingConfig {
 
     val Step4Options = listOf(
         TrainingOptionItem(
+            mode = TrainingModeChoice.KIDS_MINI_BASKET,
+            title = "Kids Mini Basket Arcade (Tiro Infantil)",
+            badge = "🏀 ¡NUEVO! • CALIBRACIÓN FOTO Y PELOTA",
+            emoji = "🎉",
+            description = "Tiro infantil en casa con 3 pasos guiados: escaneo 360º de pelota en mano, apoyo de móvil fijo y ajuste de aro sobre foto.",
+            iconBg = Color(0xFFE65100)
+        ),
+        TrainingOptionItem(
             mode = TrainingModeChoice.DEFEND_ZONE,
             title = "Defend the Zone (Defensores Fantasma)",
-            badge = "👻 ¡NUEVO JUEGO! • 3 VIDAS",
+            badge = "👻 ¡JUEGO! • 3 VIDAS",
             emoji = "🛡️",
             description = "Esquiva manos virtuales o lásers que intentan robar tu bote desde los laterales. Entrena bote de protección, crossover y uso del cuerpo como escudo.",
             iconBg = Color(0xFF5E17EB)
